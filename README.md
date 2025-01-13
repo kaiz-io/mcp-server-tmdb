@@ -39,7 +39,6 @@ Before installing and running the TMDB MCP server, ensure you have the following
 
 - **Operating Systems**
   - macOS (10.15 or later)
-  - Windows 10/11
   - Linux (modern distributions)
 
 - **Hardware Requirements**
