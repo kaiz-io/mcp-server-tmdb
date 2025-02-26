@@ -137,7 +137,7 @@ Replace `/full/path/to` with the actual path to your project directory.
 
 ## Installing via Smithery
 
-To install TMDB Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/mcp-server-tmdb):
+To install TMDB Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@Laksh-star/mcp-server-tmdb):
 
 ```bash
 npx -y @smithery/cli install @Laksh-star/mcp-server-tmdb --client claude
