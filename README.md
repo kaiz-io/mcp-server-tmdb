@@ -1,5 +1,6 @@
 # TMDB MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@Laksh-star/mcp-server-tmdb)](https://smithery.ai/server/@Laksh-star/mcp-server-tmdb)
 This MCP server integrates with The Movie Database (TMDB) API to provide movie information, search capabilities, and recommendations.
 
 <a href="https://glama.ai/mcp/servers/g3nl1a0n25"><img width="380" height="200" src="https://glama.ai/mcp/servers/g3nl1a0n25/badge" alt="mcp-server-tmdb MCP server" /></a>
@@ -133,6 +134,14 @@ To integrate this server with Claude Desktop, add the following to your app's se
 ```
 
 Replace `/full/path/to` with the actual path to your project directory.
+
+## Installing via Smithery
+
+To install TMDB Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@Laksh-star/mcp-server-tmdb):
+
+```bash
+npx -y @smithery/cli install @Laksh-star/mcp-server-tmdb --client claude
+```
 
 ## Example Usage
 
