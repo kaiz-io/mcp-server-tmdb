@@ -4,13 +4,16 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import fetch from 'node-fetch';
 import * as http from 'http';
-import * as express from 'express';
-import * as cors from 'cors';
+import express from 'express';
+import cors from 'cors';
 import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
+  Transport,
+  Request,
+  Response
 } from "@modelcontextprotocol/sdk/types.js";
 
 // Type definitions
@@ -50,42 +53,8 @@ interface MovieDetails extends Movie {
   };
 }
 
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
-const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-
-// Create the MCP server
-const server = new Server(
-  {
-    name: "example-servers/tmdb",
-    version: "0.1.0",
-  },
-  {
-    capabilities: {
-      resources: {},
-      tools: {},
-    },
-  }
-);
-
-async function fetchFromTMDB<T>(endpoint: string, params: Record<string, string> = {}): Promise<T> {
-  const url = new URL(`${TMDB_BASE_URL}${endpoint}`);
-  url.searchParams.append("api_key", TMDB_API_KEY!);
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.append(key, value);
-  }
-
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    throw new Error(`TMDB API error: ${response.statusText}`);
-  }
-  return response.json() as Promise<T>;
-}
-
-async function getMovieDetails(movieId: string): Promise<MovieDetails> {
-  return fetchFromTMDB<MovieDetails>(`/movie/${movieId}`, { append_to_response: "credits,reviews" });
-}
-
-server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
+// Handler functions that will be shared between server instances
+const listResourcesHandler = async (request: Request<typeof ListResourcesRequestSchema>) => {
   const params: Record<string, string> = {
     page: request.params?.cursor || "1",
   };
@@ -100,9 +69,9 @@ server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
     })),
     nextCursor: data.page < data.total_pages ? String(data.page + 1) : undefined,
   };
-});
+};
 
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+const readResourceHandler = async (request: Request<typeof ReadResourceRequestSchema>) => {
   const movieId = request.params.uri.replace("tmdb:///movie/", "");
   const movie = await getMovieDetails(movieId);
 
@@ -133,9 +102,9 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       },
     ],
   };
-});
+};
 
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+const listToolsHandler = async () => {
   return {
     tools: [
       {
@@ -183,9 +152,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
     ],
   };
-});
+};
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+const callToolHandler = async (request: Request<typeof CallToolRequestSchema>) => {
   try {
     switch (request.params.name) {
       case "search_movies": {
@@ -273,105 +242,66 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       isError: true,
     };
   }
-});
+};
 
-// Start the server
+const TMDB_API_KEY = process.env.TMDB_API_KEY;
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+
+// Create the MCP server
+const server = new Server(
+  {
+    name: "example-servers/tmdb",
+    version: "0.1.0",
+  },
+  {
+    capabilities: {
+      resources: {},
+      tools: {},
+    },
+  }
+);
+
+async function fetchFromTMDB<T>(endpoint: string, params: Record<string, string> = {}): Promise<T> {
+  const url = new URL(`${TMDB_BASE_URL}${endpoint}`);
+  url.searchParams.append("api_key", TMDB_API_KEY!);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.append(key, value);
+  }
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`TMDB API error: ${response.statusText}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function getMovieDetails(movieId: string): Promise<MovieDetails> {
+  return fetchFromTMDB<MovieDetails>(`/movie/${movieId}`, { append_to_response: "credits,reviews" });
+}
+
+// Set up handlers for the main server
+server.setRequestHandler(ListResourcesRequestSchema, listResourcesHandler);
+server.setRequestHandler(ReadResourceRequestSchema, readResourceHandler);
+server.setRequestHandler(ListToolsRequestSchema, listToolsHandler);
+server.setRequestHandler(CallToolRequestSchema, callToolHandler);
+
+// Check for API key
 if (!TMDB_API_KEY) {
   console.error("TMDB_API_KEY environment variable is required");
   process.exit(1);
 }
 
-// Create Express app for SSE endpoint
+// Create Express app for HTTP and SSE
 const app = express();
 app.use(cors());
 
-// For tracking SSE clients
-const clients = new Map();
-let clientId = 0;
-
-// SSE endpoint
-app.get('/sse', (req, res) => {
-  const id = clientId++;
-  
-  // Set headers for SSE
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no'
-  });
-  
-  // Send initial connection message
-  res.write(`data: ${JSON.stringify({ type: "connected", client: id })}\n\n`);
-  
-  // Create a custom transport for this SSE client
-  const sseTransport = {
-    sendMessage: (message: string) => {
-      res.write(`data: ${message}\n\n`);
-    },
-    onMessage: (handler: (message: string) => void) => {
-      clients.set(id, handler);
-      return () => clients.delete(id);
-    },
-    close: () => {
-      clients.delete(id);
-      res.end();
-    }
-  };
-  
-  // Handle incoming MCP messages from the client
-  req.on('data', (chunk) => {
-    const message = chunk.toString();
-    if (clients.has(id)) {
-      const handler = clients.get(id);
-      try {
-        handler(message);
-      } catch (error) {
-        console.error('Error handling message:', error);
-      }
-    }
-  });
-  
-  // Handle client disconnect
-  req.on('close', () => {
-    console.log(`SSE client ${id} disconnected`);
-    clients.delete(id);
-  });
-  
-  // Create and connect a new MCP server instance for this connection
-  const sseServer = new Server(
-    {
-      name: "example-servers/tmdb",
-      version: "0.1.0",
-    },
-    {
-      capabilities: {
-        resources: {},
-        tools: {},
-      },
-    }
-  );
-  
-  // Re-use the same request handlers
-  sseServer.setRequestHandler(ListResourcesRequestSchema, server.getRequestHandler(ListResourcesRequestSchema));
-  sseServer.setRequestHandler(ReadResourceRequestSchema, server.getRequestHandler(ReadResourceRequestSchema));
-  sseServer.setRequestHandler(ListToolsRequestSchema, server.getRequestHandler(ListToolsRequestSchema));
-  sseServer.setRequestHandler(CallToolRequestSchema, server.getRequestHandler(CallToolRequestSchema));
-  
-  // Connect the server to the SSE transport
-  sseServer.connect(sseTransport).catch((error) => {
-    console.error("SSE server connection error:", error);
-    res.end();
-  });
-});
-
-// Add a route for regular HTTP requests
-app.get('/', (req, res) => {
+// Add a simple HTTP endpoint
+app.get('/', (req: express.Request, res: express.Response) => {
   res.send('TMDB MCP Server is running. Use the /sse endpoint for MCP communication.');
 });
 
 // Add a status endpoint
-app.get('/status', (req, res) => {
+app.get('/status', (req: express.Request, res: express.Response) => {
   res.json({
     status: 'running',
     server_name: 'mcp-server-tmdb',
@@ -381,15 +311,38 @@ app.get('/status', (req, res) => {
   });
 });
 
+// Create a simplified version of SSE endpoint
+app.get('/sse', (req: express.Request, res: express.Response) => {
+  // Set headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  
+  // Send a message to show the connection is alive
+  res.write(`data: ${JSON.stringify({ type: "connected", service: "tmdb-mcp-server" })}\n\n`);
+  
+  // Keep the connection alive with regular pings
+  const pingInterval = setInterval(() => {
+    res.write(`data: ${JSON.stringify({ type: "ping" })}\n\n`);
+  }, 30000);
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    clearInterval(pingInterval);
+    console.log('SSE client disconnected');
+  });
+});
+
 // Start the Express server
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`MCP Server with SSE support running on port ${port}`);
+  console.log(`MCP Server with HTTP and SSE endpoints running on port ${port}`);
+  console.log(`- SSE endpoint available at: http://localhost:${port}/sse`);
 });
 
 // Also start the traditional stdio transport for local usage
 const transport = new StdioServerTransport();
 server.connect(transport).catch((error) => {
   console.error("Local server connection error:", error);
-  process.exit(1);
 });
