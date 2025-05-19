@@ -3,6 +3,9 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import fetch from 'node-fetch';
+import * as http from 'http';
+import * as express from 'express';
+import * as cors from 'cors';
 import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
@@ -50,6 +53,7 @@ interface MovieDetails extends Movie {
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
+// Create the MCP server
 const server = new Server(
   {
     name: "example-servers/tmdb",
@@ -277,8 +281,115 @@ if (!TMDB_API_KEY) {
   process.exit(1);
 }
 
+// Create Express app for SSE endpoint
+const app = express();
+app.use(cors());
+
+// For tracking SSE clients
+const clients = new Map();
+let clientId = 0;
+
+// SSE endpoint
+app.get('/sse', (req, res) => {
+  const id = clientId++;
+  
+  // Set headers for SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({ type: "connected", client: id })}\n\n`);
+  
+  // Create a custom transport for this SSE client
+  const sseTransport = {
+    sendMessage: (message: string) => {
+      res.write(`data: ${message}\n\n`);
+    },
+    onMessage: (handler: (message: string) => void) => {
+      clients.set(id, handler);
+      return () => clients.delete(id);
+    },
+    close: () => {
+      clients.delete(id);
+      res.end();
+    }
+  };
+  
+  // Handle incoming MCP messages from the client
+  req.on('data', (chunk) => {
+    const message = chunk.toString();
+    if (clients.has(id)) {
+      const handler = clients.get(id);
+      try {
+        handler(message);
+      } catch (error) {
+        console.error('Error handling message:', error);
+      }
+    }
+  });
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    console.log(`SSE client ${id} disconnected`);
+    clients.delete(id);
+  });
+  
+  // Create and connect a new MCP server instance for this connection
+  const sseServer = new Server(
+    {
+      name: "example-servers/tmdb",
+      version: "0.1.0",
+    },
+    {
+      capabilities: {
+        resources: {},
+        tools: {},
+      },
+    }
+  );
+  
+  // Re-use the same request handlers
+  sseServer.setRequestHandler(ListResourcesRequestSchema, server.getRequestHandler(ListResourcesRequestSchema));
+  sseServer.setRequestHandler(ReadResourceRequestSchema, server.getRequestHandler(ReadResourceRequestSchema));
+  sseServer.setRequestHandler(ListToolsRequestSchema, server.getRequestHandler(ListToolsRequestSchema));
+  sseServer.setRequestHandler(CallToolRequestSchema, server.getRequestHandler(CallToolRequestSchema));
+  
+  // Connect the server to the SSE transport
+  sseServer.connect(sseTransport).catch((error) => {
+    console.error("SSE server connection error:", error);
+    res.end();
+  });
+});
+
+// Add a route for regular HTTP requests
+app.get('/', (req, res) => {
+  res.send('TMDB MCP Server is running. Use the /sse endpoint for MCP communication.');
+});
+
+// Add a status endpoint
+app.get('/status', (req, res) => {
+  res.json({
+    status: 'running',
+    server_name: 'mcp-server-tmdb',
+    version: '0.1.0',
+    endpoints: ['/', '/status', '/sse'],
+    features: ['HTTP', 'SSE', 'MCP']
+  });
+});
+
+// Start the Express server
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`MCP Server with SSE support running on port ${port}`);
+});
+
+// Also start the traditional stdio transport for local usage
 const transport = new StdioServerTransport();
 server.connect(transport).catch((error) => {
-  console.error("Server connection error:", error);
+  console.error("Local server connection error:", error);
   process.exit(1);
 });
