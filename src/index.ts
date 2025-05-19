@@ -281,30 +281,51 @@ if (!TMDB_API_KEY) {
   process.exit(1);
 }
 
-// Create Express app for HTTP endpoints only
+// Create Express app for HTTP and basic SSE
 const app = express();
 app.use(cors());
 
-// Add a simple HTTP endpoint
+// Add basic HTTP endpoints
 app.get('/', (req, res) => {
-  res.send('TMDB MCP Server is running. This HTTP server is for Render.com compatibility.');
+  res.send('TMDB MCP Server is running. Use the /sse endpoint for MCP communication.');
 });
 
-// Add a status endpoint
 app.get('/status', (req, res) => {
   res.json({
     status: 'running',
     server_name: 'mcp-server-tmdb',
     version: '0.1.0',
-    endpoints: ['/', '/status'],
-    features: ['HTTP', 'MCP']
+    endpoints: ['/', '/status', '/sse'],
+    features: ['HTTP', 'SSE', 'MCP']
+  });
+});
+
+// Very minimal SSE endpoint
+app.get('/sse', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  // Send initial message
+  res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+  
+  // Keep connection alive
+  const pingInterval = setInterval(() => {
+    res.write(`data: ${JSON.stringify({ type: "ping" })}\n\n`);
+  }, 30000);
+  
+  // Clean up on client disconnect
+  req.on('close', () => {
+    clearInterval(pingInterval);
+    console.log('SSE client disconnected');
   });
 });
 
 // Start the Express server
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`HTTP server for Render compatibility running on port ${port}`);
+  console.log(`MCP Server with HTTP and minimal SSE endpoints running on port ${port}`);
 });
 
 // Start the traditional stdio transport for local usage
