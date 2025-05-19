@@ -3,6 +3,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import fetch from 'node-fetch';
+import * as http from 'http'; // Add this import
 import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
@@ -277,6 +278,31 @@ if (!TMDB_API_KEY) {
   process.exit(1);
 }
 
+// Add an HTTP server to make Render.com happy
+const port = process.env.PORT || 3000;
+const httpServer = http.createServer((req, res) => {
+  // Simple status endpoint
+  if (req.url === '/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+      status: 'running', 
+      mcp_server: 'tmdb', 
+      version: '0.1.0',
+      endpoints: ['/status', '/']
+    }));
+    return;
+  }
+  
+  // Default endpoint
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('TMDB MCP Server is running. This HTTP server is for Render.com compatibility.\n');
+});
+
+httpServer.listen(port, () => {
+  console.log(`HTTP server listening on port ${port}`);
+});
+
+// Start the MCP server as usual
 const transport = new StdioServerTransport();
 server.connect(transport).catch((error) => {
   console.error("Server connection error:", error);
