@@ -118,8 +118,9 @@ The server provides access to TMDB movie information:
 
 ### Usage with Claude Desktop
 
-To integrate this server with Claude Desktop, add the following to your app's server configuration file (located at `~/Library/Application Support/Claude/config.json`):
+To integrate this server with Claude Desktop, add one of the following configurations to your app's server configuration file (located at `~/Library/Application Support/Claude/config.json`):
 
+#### Option 1: Direct executable (macOS/Linux recommended)
 ```json
 {
   "mcpServers": {
@@ -133,7 +134,24 @@ To integrate this server with Claude Desktop, add the following to your app's se
 }
 ```
 
+#### Option 2: Node command with args (cross-platform, Windows recommended)
+```json
+{
+  "mcpServers": {
+    "tmdb": {
+      "command": "node",
+      "args": ["/full/path/to/dist/index.js"],
+      "env": {
+        "TMDB_API_KEY": "your_api_key_here"
+      }
+    }
+  }
+}
+```
+
 Replace `/full/path/to` with the actual path to your project directory.
+
+**Note**: Option 2 is more universally compatible across platforms, especially on Windows where executable scripts may not work as expected.
 
 ## Installing via Smithery
 
