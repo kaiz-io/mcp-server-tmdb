@@ -177,6 +177,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["timeWindow"],
         },
       },
+      {
+        name: "get_movie_details",
+        description: "Get detailed information about a specific movie",
+        inputSchema: {
+          type: "object",
+          properties: {
+            movieId: {
+              type: "string",
+              description: "TMDB movie ID to get details for",
+            },
+          },
+          required: ["movieId"],
+        },
+      },
     ],
   };
 });
@@ -249,6 +263,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: `Trending movies for the ${timeWindow}:\n\n${trending}`,
+            },
+          ],
+          isError: false,
+        };
+      }
+
+      case "get_movie_details": {
+        const movieId = request.params.arguments?.movieId as string;
+        const movie = await getMovieDetails(movieId);
+
+        const movieInfo = {
+          title: movie.title,
+          releaseDate: movie.release_date,
+          rating: movie.vote_average,
+          overview: movie.overview,
+          genres: movie.genres?.map(g => g.name).join(", "),
+          posterUrl: movie.poster_path ?
+            `https://image.tmdb.org/t/p/w500${movie.poster_path}` :
+            "No poster available",
+          cast: movie.credits?.cast?.slice(0, 5).map(actor => `${actor.name} as ${actor.character}`),
+          director: movie.credits?.crew?.find(person => person.job === "Director")?.name,
+          reviews: movie.reviews?.results?.slice(0, 3).map(review => ({
+            author: review.author,
+            content: review.content,
+            rating: review.rating
+          }))
+        };
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Movie Details:\n\n${JSON.stringify(movieInfo, null, 2)}`,
             },
           ],
           isError: false,
